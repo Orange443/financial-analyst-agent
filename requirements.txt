@@ -6,3 +6,5 @@ google-api-python-client
 python-dotenv
 reportlab
 tavily-python
+Flask
+Pillow
