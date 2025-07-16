@@ -57,7 +57,7 @@ def find_stocks_to_analyze(state: AgentState) -> Dict[str, Any]:
     print("---Finding Stocks to Analyze---")
     user_query = state["user_query"]
     # **THE FIX IS HERE**: Updated to a newer, recommended model name.
-    llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash", google_api_key=GOOGLE_API_KEY)
+    llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", google_api_key=GOOGLE_API_KEY)
     
     # Use the .with_structured_output() method to force the LLM to return
     # data in the format of our StocksToAnalyze Pydantic model.
@@ -142,7 +142,7 @@ def analyze_and_summarize(state: AgentState) -> Dict[str, Any]:
     
     # --- LLM and Prompt Configuration ---
     
-    llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash", google_api_key=GOOGLE_API_KEY)
+    llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", google_api_key=GOOGLE_API_KEY)
     
     # Base prompt for the analysis.
     
