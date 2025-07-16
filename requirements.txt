@@ -1,0 +1,8 @@
+langchain
+langgraph
+langchain-google-genai
+yfinance
+google-api-python-client
+python-dotenv
+reportlab
+tavily-python
