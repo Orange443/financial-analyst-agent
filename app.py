@@ -1,128 +1,139 @@
-from flask import Flask, render_template, request, send_file
+# app.py
+from flask import Flask, render_template, request, Response, send_from_directory
 import os
-import io
+import json
+import time
 import base64
 from dotenv import load_dotenv
 
-# Import reportlab components
-from reportlab.lib.pagesizes import letter
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, PageBreak, Image
-from reportlab.lib.styles import getSampleStyleSheet
-from reportlab.lib.units import inch
-
-# Import Google Generative AI for image generation
-from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain_core.messages import HumanMessage
-
-# Import the financial analysis agent
+from report_generator import generate_enhanced_pdf_report
 from agents.report_agent import app as financial_agent_app
+from langchain_google_genai import ChatGoogleGenerativeAI
+from google import genai
+from google.genai import types
 
-app = Flask(__name__)
-
-# Load environment variables
 load_dotenv()
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
+app = Flask(__name__)
 
-# Initialize Gemini model for image generation
-# Using the specified model for image generation
-gemini_image_model = ChatGoogleGenerativeAI(model="gemini-2.0-flash-preview-image-generation", google_api_key=GOOGLE_API_KEY)
-
-# Function to generate cover image
-def generate_cover_image(query: str) -> str:
-    print("Generating cover image...")
+def is_query_financial(query: str) -> bool:
+    print(f"Validating query: '{query}'")
     try:
-        prompt = f"Generate a visually appealing and professional cover image for a financial analysis report about: {query}. The image should be abstract and convey themes of finance, growth, and data analysis."
-        
-        # Use the Gemini model to generate the image
-        response = gemini_image_model.invoke([HumanMessage(content=prompt)])
-        
-        # Assuming the response content is a base64 encoded string
-        image_data_base64 = response.content
-        
-        # Decode the base64 string
-        image_bytes = base64.b64decode(image_data_base64)
-        
-        image_path = os.path.join("static", "cover_image.png")
-        with open(image_path, "wb") as f:
-            f.write(image_bytes)
-
-        print(f"Cover image generated and saved to {image_path}")
-        return image_path
+        llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", google_api_key=GOOGLE_API_KEY)
+        prompt = f"Is the following query about finance, stocks, or companies? Answer only 'yes' or 'no'.\nQuery: \"{query}\""
+        response = llm.invoke(prompt)
+        # If response is a list, get the first string element
+        if isinstance(response, list):
+            response_text = str(response[0]).strip().lower()
+        else:
+            response_text = str(response).strip().lower()
+        return "yes" in response_text
     except Exception as e:
-        print(f"Error generating cover image: {e}")
-        # Fallback to a dummy image if real generation fails
-        from PIL import Image as PILImage
-        img = PILImage.new('RGB', (600, 400), color = 'gray')
-        image_path = os.path.join("static", "cover_image_dummy.png")
-        img.save(image_path)
-        print(f"Using dummy cover image: {image_path}")
-        return image_path
-
-# Function to generate PDF report
-def generate_pdf_report(analysis_text: str, image_path: str) -> str:
-    print("Generating PDF report...")
-    pdf_buffer = io.BytesIO()
-    doc = SimpleDocTemplate(pdf_buffer, pagesize=letter)
-    styles = getSampleStyleSheet()
-    story = []
-
-    # Add cover image if available
-    if image_path and os.path.exists(image_path):
-        img = Image(image_path)
-        img.width = 6 * inch  # Adjust width as needed
-        img.height = 4 * inch # Adjust height as needed
-        story.append(img)
-        story.append(Spacer(1, 0.5 * inch))
-        story.append(Paragraph("Financial Analysis Report", styles['h1']))
-        story.append(PageBreak())
-
-    # Add analysis summary
-    story.append(Paragraph("Detailed Analysis", styles['h1']))
-    story.append(Spacer(1, 0.2 * inch))
-    for paragraph in analysis_text.split('\n\n'): # Split by double newline for paragraphs
-        story.append(Paragraph(paragraph, styles['Normal']))
-        story.append(Spacer(1, 0.1 * inch))
-
-    doc.build(story)
-    pdf_buffer.seek(0)
-
-    pdf_filename = "financial_report.pdf"
-    with open(os.path.join("static", pdf_filename), "wb") as f:
-        f.write(pdf_buffer.read())
-    print(f"PDF report generated and saved to static/{pdf_filename}")
-    return pdf_filename
+        print(f"Error during query validation: {e}")
+        return True
 
 @app.route('/')
 def index():
-    return render_template('index.html')
+    return render_template('index_v3.html')
 
-@app.route('/analyze', methods=['POST'])
-def analyze():
-    query = request.form['query']
+# In app.py
+@app.route('/analyze-stream')
+def analyze_stream():
+    query = request.args.get('query', 'No query provided')
     
-    # Run the financial analysis agent
-    print(f"Running financial agent for query: {query}")
-    initial_state = {"user_query": query, "stocks": [], "stock_data": {}, "news_data": {}, "analysis": "", "error": None}
-    final_state = financial_agent_app.invoke(initial_state)
-    analysis_result = final_state.get('analysis', 'No analysis generated.')
-    
-    # Generate cover image
-    # Ensure the 'static' directory exists
-    os.makedirs('static', exist_ok=True)
-    cover_image_path = generate_cover_image(query)
-    
-    # Generate PDF report
-    pdf_filename = generate_pdf_report(analysis_result, cover_image_path)
-    
-    return render_template('result.html', analysis_result=analysis_result, pdf_path=f"/static/{pdf_filename}")
+    def generate_updates():
+        if not is_query_financial(query):
+            yield f"data: {json.dumps({'error': 'Sorry, I can only answer financial queries.'})}\n\n"
+            return
+
+        try:
+            initial_state = {"user_query": query}
+            final_state = {}
+            
+            # --- FIX: The logical flow has been reordered to match the UI ---
+
+            # 1. Start the process
+            yield f"data: {json.dumps({'status': 'Parsing your request'})}\n\n"
+            time.sleep(0.5)
+
+            # 2. Run the main agent workflow (find stocks, get data, analyze sentiment)
+            for event in financial_agent_app.stream(initial_state, stream_mode="values"):
+                final_state.update(event) 
+                node_name = list(event.keys())[-1]
+                
+                status_map = {
+                    "find_stocks": "Identifying top stocks in sector",
+                    "get_market_data": "Fetching market data",
+                    "get_news_data": "Gathering news from Google API",
+                    "analyze_sentiment": "Analyzing sentiment",
+                    # "generate_report" is the last text step, handled after visuals
+                }
+                if node_name in status_map:
+                    yield f"data: {json.dumps({'status': status_map[node_name]})}\n\n"
+                    time.sleep(0.5)
+            
+            # 3. Now, generate the visuals
+            yield f"data: {json.dumps({'status': 'Generating report visuals'})}\n\n"
+            time.sleep(0.5)
+            
+            client = genai.Client(api_key=GOOGLE_API_KEY)
+            image_prompt = f"A professional, abstract, and visually appealing image for a financial report on '{query}'. Focus on themes of data, growth, and analytics. High-resolution, cinematic quality."
+            
+            response = client.models.generate_content(
+                model="gemini-2.0-flash-preview-image-generation",
+                contents=image_prompt,
+                config=types.GenerateContentConfig(
+                  response_modalities=['TEXT', 'IMAGE']
+                )
+            )
+            
+            image_bytes = None
+            candidates = getattr(response, "candidates", None)
+            if candidates and getattr(candidates[0], "content", None) and getattr(candidates[0].content, "parts", None):
+                for part in candidates[0].content.parts:
+                    if part.inline_data is not None:
+                        image_bytes = part.inline_data.data
+                        break
+            else:
+                raise ValueError("Image generation failed, no candidates or parts found.")
+            
+            if not image_bytes:
+                raise ValueError("Image generation failed, no image data found.")
+
+            image_bytes_b64 = base64.b64encode(image_bytes).decode('utf-8')
+
+            # 4. Finalize the report content and generate the PDF
+            yield f"data: {json.dumps({'status': 'Finalizing report'})}\n\n"
+            time.sleep(0.5)
+
+            # The 'report' data was already generated in the agent stream, now we use it
+            report = final_state.get('report')
+            if not report:
+                raise ValueError("Report generation failed.")
+
+            pdf_filename = generate_enhanced_pdf_report(
+                query, report.model_dump(), final_state.get('stock_data', {})
+            )
+            
+            # 5. Send the final payload to the UI
+            final_payload = {
+                'done': True,
+                'report': report.model_dump(),
+                'cover_image_b64': image_bytes_b64,
+                'pdf_path': f"/static/{pdf_filename}"
+            }
+            yield f"data: {json.dumps(final_payload)}\n\n"
+
+        except Exception as e:
+            print(f"An error occurred during streaming: {e}")
+            yield f"data: {json.dumps({'error': f'An error occurred: {e}'})}\n\n"
+
+    return Response(generate_updates(), mimetype='text/event-stream')
+
 
 @app.route('/static/<path:filename>')
 def serve_static(filename):
-    return send_file(os.path.join('static', filename))
+    return send_from_directory('static', filename)
 
 if __name__ == '__main__':
-    import argparse
-    parser = argparse.ArgumentParser(description='Run the Flask app.')
-    parser.add_argument('--port', type=int, default=5000, help='Port to run the Flask app on.')
-    args = parser.parse_args()
-    app.run(debug=True, port=args.port)
+    app.run(debug=True, port=5001)

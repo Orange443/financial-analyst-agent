@@ -1,10 +1,12 @@
-langchain
-langgraph
-langchain-google-genai
-yfinance
-google-api-python-client
-python-dotenv
-reportlab
-tavily-python
+# requirements.txt
 Flask
 Pillow
+matplotlib
+tavily-python
+yfinance
+python-dotenv
+reportlab
+langchain
+langgraph
+google-genai
+langchain-google-genai
