@@ -2,6 +2,10 @@
 
 This project implements a Financial Analyst Agent using LangChain and Google Generative AI. The agent can fetch financial data using `yfinance` and perform web searches using `tavily-python` to provide comprehensive financial analysis.
 
+<img width="3418" height="1880" alt="image" src="https://github.com/user-attachments/assets/218860b5-d910-4357-b8ae-6dd49a96ff31" />
+<img width="1828" height="1398" alt="image" src="https://github.com/user-attachments/assets/25b4b879-18b7-43ab-b5bb-84f43e11a1c7" />
+<img width="1846" height="1888" alt="image" src="https://github.com/user-attachments/assets/ec88ff24-504c-459c-adcd-b427a84715c2" />
+
 ## Setup Instructions
 
 Follow these steps to set up and run the project locally.
