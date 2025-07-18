@@ -1,4 +1,4 @@
-# Updated app.py with dynamic image prompt generation
+# app.py - Clean version without API monitoring
 from flask import Flask, render_template, request, Response, send_from_directory, jsonify
 import os
 import json
@@ -7,12 +7,7 @@ import time
 import random
 import logging
 from datetime import datetime
-from functools import wraps
 from dotenv import load_dotenv
-
-# Import our new monitoring modules
-from api_monitor import api_monitor
-from google_api_handler import google_error_handler, GoogleAPIErrorType
 
 from tools.yfinance_tools import get_stock_analysis
 from tools.google_tools import DynamicNewsCollector
@@ -25,21 +20,18 @@ load_dotenv()
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 app = Flask(__name__)
 
-# Enhanced logging configuration
+# Simple logging configuration
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler('financial_app_detailed.log'),
+        logging.FileHandler('financial_app.log'),
         logging.StreamHandler()
     ]
 )
 
-def generate_dynamic_image_prompt(query_analysis, fundamentals_data, performance_summary=None):
-    """
-    Generate dynamic image prompts based on sector analysis and performance data
-    No hard-coding - prompts are created on the fly based on actual analysis
-    """
+def generate_dynamic_image_prompt(query_analysis, fundamentals_data):
+    """Generate dynamic image prompts based on sector analysis and performance data"""
     
     sector_name = query_analysis.get('sector', 'general')
     query_type = query_analysis.get('type', 'general')
@@ -48,7 +40,7 @@ def generate_dynamic_image_prompt(query_analysis, fundamentals_data, performance
     # Calculate performance sentiment from actual data
     sentiment_data = calculate_performance_sentiment(fundamentals_data)
     
-    # Base industry context mapping (minimal, extensible)
+    # Base industry context mapping
     industry_contexts = {
         'fmcg': 'consumer goods, retail, packaged products, everyday essentials',
         'banking': 'financial services, banking facilities, monetary systems',
@@ -59,13 +51,10 @@ def generate_dynamic_image_prompt(query_analysis, fundamentals_data, performance
         'realty': 'real estate, construction, property development',
         'telecom': 'telecommunications, network infrastructure, connectivity',
         'metals': 'metal production, mining, industrial materials',
-        'cement': 'construction materials, building infrastructure',
-        'agriculture': 'farming, food production, agricultural technology',
-        'textiles': 'textile manufacturing, fabric production, apparel',
-        'chemicals': 'chemical processing, industrial chemicals, materials'
+        'cement': 'construction materials, building infrastructure'
     }
     
-    # Get industry context or create one dynamically
+    # Get industry context
     industry_context = industry_contexts.get(sector_name, f"{sector_name} industry operations and facilities")
     
     # Performance-based visual elements
@@ -112,7 +101,7 @@ Visual tone: {performance_elements['color_scheme']}
         
 Style: Professional architectural photography, corporate aesthetic."""
     
-    # Add confidence indicator to prompt quality
+    # Add confidence indicator
     if confidence > 0.8:
         prompt += f"\nImage should reflect high confidence in {sector_name} sector identification."
     elif confidence > 0.5:
@@ -252,66 +241,19 @@ def get_market_condition_descriptors(sentiment_data):
         'positive_ratio': positive_ratio
     }
 
-def monitor_api_call(api_type: str):
-    """Decorator to monitor API calls"""
-    def decorator(func):
-        @wraps(func)
-        def wrapper(*args, **kwargs):
-            # Check if we can make the request
-            if not api_monitor.can_make_request(api_type):
-                raise Exception(f"API quota limit approaching for {api_type}. Request blocked for safety.")
-            
-            start_time = time.time()
-            success = False
-            
-            try:
-                result = func(*args, **kwargs)
-                success = True
-                return result
-            except Exception as e:
-                # Analyze the error
-                error_info = google_error_handler.analyze_error(e)
-                google_error_handler.log_error_details(e, error_info)
-                
-                # Log quota exceeded specifically
-                if error_info.error_type == GoogleAPIErrorType.QUOTA_EXCEEDED:
-                    api_monitor.log_quota_exceeded(api_type)
-                
-                raise e
-            finally:
-                # Log the API call
-                execution_time = time.time() - start_time
-                api_monitor.log_api_call(api_type, success, estimated_cost=0.001)
-                logging.info(f"API call {api_type} completed in {execution_time:.2f}s, success: {success}")
-        
-        return wrapper
-    return decorator
-
-@monitor_api_call('gemini_image')
-def generate_ai_image_monitored(client, image_prompt):
-    """Generate AI image with monitoring"""
-    try:
-        response = client.models.generate_content(
-            model="gemini-2.0-flash-preview-image-generation",
-            contents=image_prompt,
-            config=types.GenerateContentConfig(
-                response_modalities=['TEXT', 'IMAGE']
-            )
+def generate_ai_image(client, image_prompt):
+    """Generate AI image"""
+    response = client.models.generate_content(
+        model="gemini-2.0-flash-preview-image-generation",
+        contents=image_prompt,
+        config=types.GenerateContentConfig(
+            response_modalities=['TEXT', 'IMAGE']
         )
-        return response
-    except Exception as e:
-        error_info = google_error_handler.analyze_error(e)
-        
-        if error_info.error_type == GoogleAPIErrorType.QUOTA_EXCEEDED:
-            raise Exception("Google API quota exceeded. Please wait until midnight UTC for quota reset.")
-        elif error_info.error_type == GoogleAPIErrorType.SERVICE_UNAVAILABLE:
-            raise Exception("Google AI service temporarily unavailable. Please try again in a few minutes.")
-        else:
-            raise Exception(f"Google API error: {error_info.message}")
+    )
+    return response
 
-@monitor_api_call('gemini_text')
-def validate_query_monitored(query):
-    """Validate financial query with monitoring"""
+def validate_query(query):
+    """Validate financial query"""
     try:
         llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", google_api_key=GOOGLE_API_KEY)
         prompt = f"Is this query about finance, stocks, companies, or markets? Answer only 'yes' or 'no'.\nQuery: '{query}'"
@@ -324,12 +266,11 @@ def validate_query_monitored(query):
         
         return "yes" in response_text
     except Exception as e:
-        error_info = google_error_handler.analyze_error(e)
-        logging.warning(f"Query validation failed: {error_info.message}")
-        return True  # Default to allowing query
+        logging.warning(f"Query validation failed: {e}")
+        return True
 
 def is_query_financial(query: str) -> bool:
-    """Enhanced financial query validation with API monitoring"""
+    """Enhanced financial query validation"""
     financial_keywords = [
         'stock', 'sector', 'company', 'market', 'investment', 'financial', 'earnings',
         'revenue', 'profit', 'analysis', 'report', 'trading', 'share', 'equity',
@@ -343,54 +284,23 @@ def is_query_financial(query: str) -> bool:
         return True
     
     # Use LLM validation only if keywords don't match
-    try:
-        return validate_query_monitored(query)
-    except Exception as e:
-        logging.warning(f"LLM validation failed: {e}")
-        return True
+    return validate_query(query)
 
 @app.route('/')
 def index():
     return render_template('index_v3.html')
-
-@app.route('/api-status')
-def api_status():
-    """API endpoint to check current API usage status"""
-    try:
-        status = api_monitor.get_usage_status()
-        status['time_until_reset'] = api_monitor.get_time_until_reset()
-        status['recommendations'] = api_monitor._generate_recommendations()
-        return jsonify(status)
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
 
 @app.route('/analyze-stream')
 def analyze_stream():
     query = request.args.get('query', 'No query provided')
     
     def generate_updates():
-        # First check API status
-        try:
-            status = api_monitor.get_usage_status()
-            logging.info(f"Starting analysis with API status: {status}")
-            
-            # Check if any API is at critical usage
-            critical_apis = [api for api, stats in status['api_breakdown'].items() 
-                           if float(stats['percentage'].replace('%', '')) >= 90]
-            
-            if critical_apis:
-                yield f"data: {json.dumps({'error': f'API quota critical for: {critical_apis}. Please wait for quota reset.'})}\n\n"
-                return
-                
-        except Exception as e:
-            logging.error(f"Error checking API status: {e}")
-        
         if not is_query_financial(query):
             yield f"data: {json.dumps({'error': 'Sorry, I can only answer financial queries.'})}\n\n"
             return
 
         try:
-            # Step 1: Enhanced data collection
+            # Step 1: Data collection
             yield f"data: {json.dumps({'status': 'Analyzing your query and discovering relevant stocks'})}\n\n"
             
             start_time = datetime.now()
@@ -405,26 +315,22 @@ def analyze_stream():
                 metrics = analysis_data['performance_metrics']
                 logging.info(f"Data collection: {metrics['successful_fetches']}/{metrics['companies_processed']} stocks in {metrics['total_execution_time']:.2f}s")
 
-            # Step 2: DYNAMIC SECTOR-AWARE IMAGE GENERATION
+            # Step 2: Dynamic image generation
             yield f"data: {json.dumps({'status': 'Generating intelligent sector visuals based on analysis'})}\n\n"
             
             image_bytes_b64 = ""
             try:
-                # Check if we can make image generation request
-                if api_monitor.can_make_request('gemini_image'):
+                if GOOGLE_API_KEY:
                     client = genai.Client(api_key=GOOGLE_API_KEY)
                     query_analysis = analysis_data.get('query_analysis', {})
                     fundamentals_data = analysis_data.get('fundamentals', {})
                     
-                    # GENERATE DYNAMIC PROMPT BASED ON ACTUAL ANALYSIS DATA
-                    dynamic_prompt = generate_dynamic_image_prompt(
-                        query_analysis, 
-                        fundamentals_data
-                    )
+                    # Generate dynamic prompt
+                    dynamic_prompt = generate_dynamic_image_prompt(query_analysis, fundamentals_data)
                     
                     logging.info(f"Dynamic prompt generated for {query_analysis.get('sector', 'general')} sector")
                     
-                    response = generate_ai_image_monitored(client, dynamic_prompt)
+                    response = generate_ai_image(client, dynamic_prompt)
                     
                     # Extract image data
                     image_bytes = None
@@ -440,17 +346,9 @@ def analyze_stream():
                         logging.info("Dynamic sector image generated successfully")
                     else:
                         logging.warning("No image data received from dynamic prompt")
-                else:
-                    logging.warning("Skipping image generation due to API quota limits")
-                    
+                        
             except Exception as e:
-                error_info = google_error_handler.analyze_error(e)
-                logging.warning(f"Dynamic image generation failed: {error_info.message}")
-                
-                if error_info.error_type == GoogleAPIErrorType.QUOTA_EXCEEDED:
-                    yield f"data: {json.dumps({'warning': 'Image generation skipped - API quota exceeded'})}\n\n"
-                else:
-                    yield f"data: {json.dumps({'warning': f'Dynamic image generation failed: {error_info.message}'})}\n\n"
+                logging.warning(f"Dynamic image generation failed: {e}")
 
             # Step 3: Report generation
             yield f"data: {json.dumps({'status': 'Finalizing comprehensive financial report'})}\n\n"
@@ -465,12 +363,12 @@ def analyze_stream():
                 else:
                     report_title = f"Financial Analysis: {query}"
                 
+                # Ensure static directory exists
+                os.makedirs('static', exist_ok=True)
+                
                 pdf_filename = generate_investment_report(report_title, analysis_data)
                 
-                # Get final API status
-                final_status = api_monitor.get_usage_status()
-                
-                # --- Dynamic Content Generation ---
+                # Dynamic Content Generation
                 fundamentals = analysis_data.get('fundamentals', {})
                 executive_summary = f"This report provides a detailed analysis of the {query_analysis.get('sector', 'general')} sector. "
                 if fundamentals:
@@ -504,7 +402,7 @@ def analyze_stream():
                     highest_volume_stock = max(fundamentals.values(), key=lambda x: x.get('marketCap', 0))
                     key_findings['highest_volume_stock'] = highest_volume_stock.get('name', 'N/A')
 
-                    # Overall sentiment based on performance data
+                    # Overall sentiment
                     sentiment_data = calculate_performance_sentiment(fundamentals)
                     key_findings['overall_sentiment'] = sentiment_data['overall_sentiment'].title()
 
@@ -530,7 +428,6 @@ def analyze_stream():
                     'successful_tickers': len([t for t in analysis_data.get('fundamentals', {})
                                              if analysis_data['fundamentals'][t].get('regularMarketPrice')]),
                     'performance_metrics': analysis_data.get('performance_metrics', {}),
-                    'api_usage_status': final_status,
                     'cover_image_b64': image_bytes_b64,
                     'pdf_path': f"/static/{pdf_filename}",
                     'report': {
@@ -550,27 +447,10 @@ def analyze_stream():
                 yield f"data: {json.dumps({'error': f'Report generation failed: {str(e)}'})}\n\n"
 
         except Exception as e:
-            error_info = google_error_handler.analyze_error(e)
-            logging.error(f"Critical error in analyze_stream: {error_info.message}")
-            
-            if error_info.error_type == GoogleAPIErrorType.QUOTA_EXCEEDED:
-                yield f"data: {json.dumps({'error': 'API quota exceeded. Please wait for quota reset or try again later.'})}\n\n"
-            else:
-                yield f"data: {json.dumps({'error': f'Server error: {error_info.message}'})}\n\n"
+            logging.error(f"Critical error in analyze_stream: {e}")
+            yield f"data: {json.dumps({'error': f'Server error: {str(e)}. Please try again.'})}\n\n"
 
     return Response(generate_updates(), mimetype='text/event-stream')
-
-@app.route('/export-usage-report')
-def export_usage_report():
-    """Export detailed API usage report"""
-    try:
-        filename = api_monitor.export_usage_report()
-        if filename:
-            return send_from_directory('.', filename, as_attachment=True)
-        else:
-            return jsonify({'error': 'Failed to generate report'}), 500
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
 
 @app.errorhandler(500)
 def handle_internal_error(error):
@@ -578,8 +458,7 @@ def handle_internal_error(error):
     return jsonify({
         'error': 'Internal Server Error',
         'message': 'An internal error occurred. Please try again.',
-        'retry_suggested': True,
-        'api_status': api_monitor.get_usage_status()
+        'retry_suggested': True
     }), 500
 
 @app.route('/static/<path:filename>')
@@ -587,9 +466,5 @@ def serve_static(filename):
     return send_from_directory('static', filename)
 
 if __name__ == '__main__':
-    # Log initial API status
     logging.info("Starting Financial Analysis Application")
-    initial_status = api_monitor.get_usage_status()
-    logging.info(f"Initial API Status: {initial_status}")
-    
     app.run(debug=True, port=5001)

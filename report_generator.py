@@ -131,6 +131,7 @@ def create_comprehensive_price_chart(stock_data, price_targets, output_path):
         ax2.grid(True, alpha=0.3)
         
         # Format y-axis for volume
+        
         ax2.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: f'{x/1e6:.1f}M' if x >= 1e6 else f'{x/1e3:.0f}K'))
         
         plt.tight_layout(pad=3.0)
