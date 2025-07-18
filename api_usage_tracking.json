@@ -1,0 +1,10 @@
+{
+  "date": "2025-07-18",
+  "gemini_image_calls": 9,
+  "gemini_text_calls": 0,
+  "gemini_chat_calls": 0,
+  "total_calls": 9,
+  "total_cost_estimate": 0.009000000000000001,
+  "errors": 0,
+  "quota_exceeded_count": 0
+}

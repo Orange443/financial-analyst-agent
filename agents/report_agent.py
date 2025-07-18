@@ -107,6 +107,7 @@ def generate_final_report(state: AgentState) -> Dict[str, Any]:
     report = structured_llm.invoke(prompt)
     return {"report": report}
 
+# --- This is the LangGraph definition the user wants to keep ---
 workflow = StateGraph(AgentState)
 workflow.add_node("find_stocks", find_stocks_to_analyze)
 workflow.add_node("get_market_data", get_market_data)

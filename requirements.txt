@@ -1,6 +1,6 @@
 # requirements.txt
 Flask
-Pillow
+
 matplotlib
 tavily-python
 yfinance

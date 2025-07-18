@@ -1,66 +1,117 @@
+# tools/google_tools.py
 import os
 from dotenv import load_dotenv
 import logging
 from tavily import TavilyClient
 
-# --- Setup Logging ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-# --- Setup Environment ---
 load_dotenv()
 TAVILY_API_KEY = os.getenv("TAVILY_API_KEY")
 
-# --- Tool Function ---
-def search_google_news(query: str, num_results: int = 5):
-    """
-    A tool to search for news articles using the Tavily API.
-
-    Args:
-        query (str): The search query (e.g., "Reliance Industries stock news").
-        num_results (int): The number of search results to return. Defaults to 5.
-
-    Returns:
-        list: A list of dictionaries, each containing the title, link, and snippet of a search result.
-              Returns an empty list if the API call fails.
-    """
-    if not TAVILY_API_KEY:
-        logging.warning("TAVILY_API_KEY is not configured in .env file. Returning empty list.")
-        return []
-
-    try:
-        logging.info(f"Performing Tavily search for: '{query}'")
-        tavily = TavilyClient(api_key=TAVILY_API_KEY)
-        response = tavily.search(query=query, search_depth="advanced", max_results=num_results)
+class DynamicNewsCollector:
+    def __init__(self):
+        self.tavily_client = TavilyClient(api_key=TAVILY_API_KEY) if TAVILY_API_KEY else None
+    
+    def collect_news_for_tickers(self, tickers, fundamentals_data):
+        """Collect news for multiple tickers dynamically"""
+        news_data = {}
         
-        # Extract the relevant parts from the search results.
-        formatted_results = [
+        if not self.tavily_client:
+            logging.warning("Tavily API key not configured")
+            return news_data
+        
+        for ticker in tickers:
+            # Get company name for better search
+            company_name = self.get_company_name(ticker, fundamentals_data)
+            
+            # Search for news
+            news_results = self.search_company_news(company_name, ticker)
+            if news_results:
+                news_data[ticker] = news_results
+        
+        return news_data
+    
+    def get_company_name(self, ticker, fundamentals_data):
+        """Extract company name from fundamentals data"""
+        if ticker in fundamentals_data:
+            return fundamentals_data[ticker].get('name', ticker.replace('.NS', ''))
+        return ticker.replace('.NS', '')
+    
+    def search_company_news(self, company_name, ticker, num_results=3):
+        """Search for news about a specific company"""
+        try:
+            # Create search query
+            query = f"{company_name} stock news earnings financial results"
+            
+            response = self.tavily_client.search(
+                query=query,
+                search_depth="advanced",
+                max_results=num_results
+            )
+            
+            # Format results
+            formatted_results = []
+            for item in response.get('results', []):
+                formatted_results.append({
+                    "title": item.get('title'),
+                    "link": item.get('url'),
+                    "snippet": item.get('content') or item.get('description', 'No preview available'),
+                    "relevance_score": item.get('score', 0)
+                })
+            
+            return formatted_results
+            
+        except Exception as e:
+            logging.error(f"Error searching news for {company_name}: {e}")
+            return []
+    
+    def analyze_news_sentiment(self, news_articles):
+        """Analyze sentiment of news articles"""
+        if not news_articles:
+            return 'Neutral'
+        
+        positive_words = ['growth', 'profit', 'gain', 'rise', 'strong', 'positive', 'bullish', 'upgrade']
+        negative_words = ['loss', 'fall', 'decline', 'weak', 'negative', 'bearish', 'downgrade', 'concern']
+        
+        sentiment_score = 0
+        for article in news_articles:
+            text = (article.get('title', '') + ' ' + article.get('snippet', '')).lower()
+            
+            positive_count = sum(1 for word in positive_words if word in text)
+            negative_count = sum(1 for word in negative_words if word in text)
+            
+            sentiment_score += positive_count - negative_count
+        
+        if sentiment_score > 0:
+            return 'Positive'
+        elif sentiment_score < 0:
+            return 'Negative'
+        else:
+            return 'Neutral'
+
+# Backward compatibility
+def search_google_news(query, num_results=5):
+    """Legacy function for backward compatibility"""
+    collector = DynamicNewsCollector()
+    if not collector.tavily_client:
+        return []
+    
+    try:
+        response = collector.tavily_client.search(
+            query=query,
+            search_depth="advanced",
+            max_results=num_results
+        )
+        
+        return [
             {
                 "title": item.get('title'),
                 "link": item.get('url'),
-                "snippet": item.get('content')
+                "snippet": item.get('content') or item.get('description', 'No preview available')
             }
             for item in response.get('results', [])
         ]
-        
-        logging.info(f"Found {len(formatted_results)} results.")
-        return formatted_results
-
     except Exception as e:
-        logging.error(f"An unexpected error occurred during Tavily search: {e}. Returning empty list.")
+        logging.error(f"Error in legacy news search: {e}")
         return []
-
-# --- Testing Block ---
-if __name__ == "__main__":
-    logging.info("\n--- Running Test for google_tools.py (with Tavily) ---")
-    
-    # Example: Searching for news about HDFC Bank
-    test_query = "HDFC Bank stock news"
-    news_results = search_google_news(query=test_query)
-    
-    if news_results:
-        print(f"\nSuccessfully fetched news for '{test_query}':")
-        # Print the title of the first result.
-        print(f"Top result: {news_results[0]['title']}")
-        print(f"Link: {news_results[0]['link']}")
-    else:
-        print("\nNo news results returned. This could be due to an error or no results found.")
